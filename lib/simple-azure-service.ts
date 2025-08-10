@@ -131,17 +131,14 @@ export class SimpleAzureDocumentService {
   private getModelId(documentType: string): string {
   switch (documentType) {
     case 'W2':
-      return 'prebuilt-tax.us.w2'  // ✅ This works perfectly (99.9% accuracy!)
-    
-    // Azure only has a general 1099 model, not specific ones
+      return 'prebuilt-tax.us.w2'  // This works perfectly!
     case 'FORM_1099_NEC':
     case 'FORM_1099_MISC':
     case 'FORM_1099_INT':
     case 'FORM_1099_DIV':
     case 'FORM_1099_R':
     case 'FORM_1099_G':
-      return 'prebuilt-tax.us.1099'  // Use the general 1099 model that exists
-    
+      return 'prebuilt-document'  // Use general model
     default:
       return 'prebuilt-document'
   }
