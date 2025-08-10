@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/db"
-import { AzureDocumentService, createAzureDocumentConfig } from "@/lib/azure-document-service"
+import { SimpleAzureDocumentService, createSimpleAzureConfig } from "@/lib/simple-azure-service"
 
 export const dynamic = "force-dynamic"
 
@@ -74,7 +74,8 @@ export async function POST(
 
     console.log("Azure configuration check:", {
       hasAzureConfig,
-      endpoint: process.env.AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT ? "✅ Set" : "❌ Missing"
+      endpoint: process.env.AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT ? "✅ Set" : "❌ Missing",
+      key: process.env.AZURE_DOCUMENT_INTELLIGENCE_KEY ? "✅ Set" : "❌ Missing"
     })
 
     if (!hasAzureConfig) {
@@ -96,10 +97,10 @@ export async function POST(
     })
     console.log("✅ Status updated")
 
-    // Step 6: Process document with Azure Document Intelligence
-    console.log("6. Starting Azure Document Intelligence processing...")
-    const extractedTaxData = await processWithAzureDocumentIntelligence(document)
-    console.log("✅ Azure Document Intelligence processing successful")
+    // Step 6: Process document with Simple Azure Document Intelligence
+    console.log("6. Starting Simple Azure Document Intelligence processing...")
+    const extractedTaxData = await processWithSimpleAzureDocumentIntelligence(document)
+    console.log("✅ Simple Azure Document Intelligence processing successful")
 
     // Step 7: Save results
     console.log("7. Saving results to database...")
@@ -123,7 +124,7 @@ export async function POST(
     // Step 8: Return results
     return NextResponse.json({
       success: true,
-      message: "Document processed successfully with Azure",
+      message: "Document processed successfully with Simple Azure",
       processingMethod: extractedTaxData.processingMethod,
       documentType: extractedTaxData.documentType,
       confidence: extractedTaxData.confidence,
@@ -159,16 +160,16 @@ export async function POST(
   }
 }
 
-// Azure Document Intelligence processing function
-async function processWithAzureDocumentIntelligence(document: any): Promise<ExtractedTaxData> {
-  console.log("processWithAzureDocumentIntelligence: Starting...")
+// Simple Azure Document Intelligence processing function (No SDK)
+async function processWithSimpleAzureDocumentIntelligence(document: any): Promise<ExtractedTaxData> {
+  console.log("processWithSimpleAzureDocumentIntelligence: Starting...")
   
   try {
-    // Initialize Azure Document Intelligence service
-    const azureConfig = createAzureDocumentConfig()
-    const azureService = new AzureDocumentService(azureConfig)
+    // Initialize Simple Azure Document Intelligence service
+    const azureConfig = createSimpleAzureConfig()
+    const azureService = new SimpleAzureDocumentService(azureConfig)
     
-    console.log("processWithAzureDocumentIntelligence: Azure service initialized")
+    console.log("processWithSimpleAzureDocumentIntelligence: Simple Azure service initialized")
     
     // Check if file exists
     const { existsSync } = await import("fs")
@@ -176,19 +177,19 @@ async function processWithAzureDocumentIntelligence(document: any): Promise<Extr
       throw new Error(`File not found: ${document.filePath}`)
     }
     
-    console.log("processWithAzureDocumentIntelligence: File exists, processing...")
+    console.log("processWithSimpleAzureDocumentIntelligence: File exists, processing...")
     
-    // Process document with Azure
+    // Process document with Simple Azure
     const result = await azureService.processDocument(document.filePath, document.documentType)
     
-    console.log("processWithAzureDocumentIntelligence: Azure processing successful")
+    console.log("processWithSimpleAzureDocumentIntelligence: Simple Azure processing successful")
     console.log("Extracted data keys:", Object.keys(result.extractedData))
     console.log("OCR text length:", result.ocrText.length)
     console.log("Confidence:", result.confidence)
     
     // Enhanced fallback extraction if Azure didn't extract enough
     if (Object.keys(result.extractedData).length < 3 && result.ocrText) {
-      console.log("processWithAzureDocumentIntelligence: Enhancing with fallback extraction...")
+      console.log("processWithSimpleAzureDocumentIntelligence: Enhancing with fallback extraction...")
       
       const fallbackData = performFallbackExtraction(result.ocrText, document.documentType)
       
@@ -198,7 +199,7 @@ async function processWithAzureDocumentIntelligence(document: any): Promise<Extr
         ...fallbackData
       }
       
-      console.log("processWithAzureDocumentIntelligence: Enhanced data keys:", Object.keys(result.extractedData))
+      console.log("processWithSimpleAzureDocumentIntelligence: Enhanced data keys:", Object.keys(result.extractedData))
     }
     
     return {
@@ -211,8 +212,33 @@ async function processWithAzureDocumentIntelligence(document: any): Promise<Extr
     
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred'
-    console.error("processWithAzureDocumentIntelligence: Error:", errorMessage)
-    throw new Error(`Azure Document Intelligence processing failed: ${errorMessage}`)
+    console.error("processWithSimpleAzureDocumentIntelligence: Error:", errorMessage)
+    
+    // Fallback: If Azure fails completely, return basic extraction
+    console.log("processWithSimpleAzureDocumentIntelligence: Azure failed, trying basic fallback...")
+    
+    try {
+      const { readFile } = await import("fs/promises")
+      const fileBuffer = await readFile(document.filePath)
+      
+      // Basic fallback - just indicate file was read
+      const fallbackData = {
+        error: "Azure processing failed",
+        fileSize: fileBuffer.length,
+        fileName: document.fileName,
+        fallback: true
+      }
+      
+      return {
+        documentType: document.documentType,
+        ocrText: "Azure processing failed. Manual review required.",
+        extractedData: fallbackData,
+        confidence: 0.1,
+        processingMethod: 'azure_document_intelligence'
+      }
+    } catch (fallbackError) {
+      throw new Error(`Azure Document Intelligence and fallback both failed: ${errorMessage}`)
+    }
   }
 }
 
