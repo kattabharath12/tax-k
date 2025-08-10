@@ -1,0 +1,9 @@
+Sample W-2 Form
+Employee Name: John Doe
+Employer Name: ABC Corporation
+Federal wages, tips, other compensation: 0,000
+Federal income tax withheld: ,500
+Social security wages: 0,000
+Social security tax withheld: ,100
+Medicare wages and tips: 0,000
+Medicare tax withheld: 25

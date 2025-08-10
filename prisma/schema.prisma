@@ -1,0 +1,429 @@
+generator client {
+    provider = "prisma-client-js"
+    binaryTargets = ["native", "linux-musl-arm64-openssl-3.0.x"]
+}
+
+datasource db {
+    provider = "postgresql"
+    url      = env("DATABASE_URL")
+}
+
+// NextAuth models
+model Account {
+    id                String  @id @default(cuid())
+    userId            String
+    type              String
+    provider          String
+    providerAccountId String
+    refresh_token     String? @db.Text
+    access_token      String? @db.Text
+    expires_at        Int?
+    token_type        String?
+    scope             String?
+    id_token          String? @db.Text
+    session_state     String?
+
+    user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+    @@unique([provider, providerAccountId])
+}
+
+model Session {
+    id           String   @id @default(cuid())
+    sessionToken String   @unique
+    userId       String
+    expires      DateTime
+    user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model User {
+    id            String    @id @default(cuid())
+    name          String?
+    email         String    @unique
+    emailVerified DateTime?
+    image         String?
+    password      String?
+    accounts      Account[]
+    sessions      Session[]
+    taxReturns    TaxReturn[]
+    dataUploads   DataUpload[]
+    dataMappings  DataMapping[]
+    createdAt     DateTime  @default(now())
+    updatedAt     DateTime  @updatedAt
+}
+
+model VerificationToken {
+    identifier String
+    token      String   @unique
+    expires    DateTime
+
+    @@unique([identifier, token])
+}
+
+// Tax Filing Models
+model TaxReturn {
+    id                String         @id @default(cuid())
+    userId            String
+    taxYear           Int
+    filingStatus      FilingStatus
+    firstName         String?
+    lastName          String?
+    ssn               String?
+    spouseFirstName   String?
+    spouseLastName    String?
+    spouseSsn         String?
+    address           String?
+    city              String?
+    state             String?
+    zipCode           String?
+    
+    // Tax calculation fields
+    totalIncome       Decimal        @default(0) @db.Decimal(12, 2)
+    adjustedGrossIncome Decimal      @default(0) @db.Decimal(12, 2)
+    standardDeduction Decimal        @default(0) @db.Decimal(12, 2)
+    itemizedDeduction Decimal        @default(0) @db.Decimal(12, 2)
+    taxableIncome     Decimal        @default(0) @db.Decimal(12, 2)
+    taxLiability      Decimal        @default(0) @db.Decimal(12, 2)
+    totalCredits      Decimal        @default(0) @db.Decimal(12, 2)
+    refundAmount      Decimal        @default(0) @db.Decimal(12, 2)
+    amountOwed        Decimal        @default(0) @db.Decimal(12, 2)
+    
+    // Status tracking
+    currentStep       Int            @default(1)
+    completedSteps    Int[]          @default([])
+    lastSavedAt       DateTime?
+    isCompleted       Boolean        @default(false)
+    isFiled           Boolean        @default(false)
+    
+    user              User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+    incomeEntries     IncomeEntry[]
+    deductionEntries  DeductionEntry[]
+    dependents        Dependent[]
+    documents         Document[]
+    dataUploads       DataUpload[]
+    processedForms    ProcessedFormData[]
+    
+    createdAt         DateTime       @default(now())
+    updatedAt         DateTime       @updatedAt
+    
+    @@unique([userId, taxYear])
+}
+
+model IncomeEntry {
+    id            String        @id @default(cuid())
+    taxReturnId   String
+    incomeType    IncomeType
+    description   String?
+    amount        Decimal       @db.Decimal(12, 2)
+    
+    // W-2 specific fields
+    employerName  String?
+    employerEIN   String?
+    
+    // 1099 specific fields
+    payerName     String?
+    payerTIN      String?
+    
+    taxReturn     TaxReturn     @relation(fields: [taxReturnId], references: [id], onDelete: Cascade)
+    extractedEntries DocumentExtractedEntry[]
+    createdAt     DateTime      @default(now())
+    updatedAt     DateTime      @updatedAt
+}
+
+model DeductionEntry {
+    id            String        @id @default(cuid())
+    taxReturnId   String
+    deductionType DeductionType
+    description   String?
+    amount        Decimal       @db.Decimal(12, 2)
+    
+    taxReturn     TaxReturn     @relation(fields: [taxReturnId], references: [id], onDelete: Cascade)
+    extractedEntries DocumentExtractedEntry[]
+    createdAt     DateTime      @default(now())
+    updatedAt     DateTime      @updatedAt
+}
+
+model Dependent {
+    id            String        @id @default(cuid())
+    taxReturnId   String
+    firstName     String
+    lastName      String
+    ssn           String?
+    relationship  String
+    birthDate     DateTime
+    
+    // Credit eligibility
+    qualifiesForCTC Boolean     @default(false)
+    qualifiesForEITC Boolean    @default(false)
+    
+    taxReturn     TaxReturn     @relation(fields: [taxReturnId], references: [id], onDelete: Cascade)
+    createdAt     DateTime      @default(now())
+    updatedAt     DateTime      @updatedAt
+}
+
+// Document storage models
+model Document {
+    id              String        @id @default(cuid())
+    taxReturnId     String
+    fileName        String
+    fileType        String
+    fileSize        Int
+    filePath        String
+    documentType    DocumentType
+    processingStatus ProcessingStatus @default(PENDING)
+    
+    // OCR and extraction results
+    ocrText         String?       @db.Text
+    extractedData   Json?
+    
+    // Verification and editing
+    isVerified      Boolean       @default(false)
+    verifiedBy      String?
+    verificationNotes String?     @db.Text
+    
+    taxReturn       TaxReturn     @relation(fields: [taxReturnId], references: [id], onDelete: Cascade)
+    extractedEntries DocumentExtractedEntry[]
+    
+    createdAt       DateTime      @default(now())
+    updatedAt       DateTime      @updatedAt
+}
+
+model DocumentExtractedEntry {
+    id          String        @id @default(cuid())
+    documentId  String
+    entryType   EntryType
+    
+    // Generic extracted data
+    extractedData Json
+    
+    // Link to actual income/deduction entries if accepted
+    incomeEntryId String?
+    deductionEntryId String?
+    
+    // Status tracking
+    isAccepted  Boolean       @default(false)
+    isEdited    Boolean       @default(false)
+    
+    document    Document      @relation(fields: [documentId], references: [id], onDelete: Cascade)
+    incomeEntry IncomeEntry?  @relation(fields: [incomeEntryId], references: [id], onDelete: SetNull)
+    deductionEntry DeductionEntry? @relation(fields: [deductionEntryId], references: [id], onDelete: SetNull)
+    
+    createdAt   DateTime      @default(now())
+    updatedAt   DateTime      @updatedAt
+}
+
+// Enums
+enum FilingStatus {
+    SINGLE
+    MARRIED_FILING_JOINTLY
+    MARRIED_FILING_SEPARATELY
+    HEAD_OF_HOUSEHOLD
+    QUALIFYING_SURVIVING_SPOUSE
+}
+
+enum IncomeType {
+    W2_WAGES
+    INTEREST
+    DIVIDENDS
+    BUSINESS_INCOME
+    CAPITAL_GAINS
+    OTHER_INCOME
+    UNEMPLOYMENT
+    RETIREMENT_DISTRIBUTIONS
+    SOCIAL_SECURITY
+    NONEMPLOYEE_COMPENSATION
+    RENTS
+    ROYALTIES
+    FISHING_BOAT_PROCEEDS
+    MEDICAL_PAYMENTS
+    SUBSTITUTE_PAYMENTS
+    CROP_INSURANCE_PROCEEDS
+    EXCESS_GOLDEN_PARACHUTE
+    NONQUALIFIED_DEFERRED_COMPENSATION
+    STATE_TAX_REFUNDS
+    GAMBLING_WINNINGS
+    PROCEEDS_FROM_BROKER
+    PROCEEDS_FROM_REAL_ESTATE
+    ACQUISITION_ABANDONMENT_SECURED_PROPERTY
+    CANCELLATION_OF_DEBT
+    ORIGINAL_ISSUE_DISCOUNT
+    TAXABLE_PATRONAGE_DIVIDENDS
+    QUALIFIED_EDUCATION_EXPENSES
+    ARCHER_MSA_DISTRIBUTIONS
+}
+
+enum DeductionType {
+    MORTGAGE_INTEREST
+    STATE_LOCAL_TAXES
+    CHARITABLE_CONTRIBUTIONS
+    MEDICAL_EXPENSES
+    BUSINESS_EXPENSES
+    STUDENT_LOAN_INTEREST
+    IRA_CONTRIBUTIONS
+    OTHER_DEDUCTIONS
+}
+
+enum DocumentType {
+    W2
+    W2_CORRECTED
+    W3
+    FORM_1099_INT
+    FORM_1099_DIV
+    FORM_1099_MISC
+    FORM_1099_NEC
+    FORM_1099_R
+    FORM_1099_G
+    FORM_1099_K
+    FORM_1099_B
+    FORM_1099_S
+    FORM_1099_A
+    FORM_1099_C
+    FORM_1099_OID
+    FORM_1099_PATR
+    FORM_1099_Q
+    FORM_1099_SA
+    FORM_1098
+    FORM_1098_E
+    FORM_1098_T
+    FORM_5498
+    SCHEDULE_K1
+    OTHER_TAX_DOCUMENT
+    RECEIPT
+    STATEMENT
+    UNKNOWN
+}
+
+enum ProcessingStatus {
+    PENDING
+    PROCESSING
+    COMPLETED
+    FAILED
+    MANUAL_REVIEW_REQUIRED
+}
+
+enum EntryType {
+    INCOME
+    DEDUCTION
+    CREDIT
+    WITHHOLDING
+}
+
+// Data Upload and Mapping Models
+model DataUpload {
+    id          String      @id @default(cuid())
+    userId      String
+    taxReturnId String?
+    fileName    String
+    fileType    String      // CSV, EXCEL, JSON
+    fileSize    Int
+    filePath    String
+    status      UploadStatus @default(PENDING)
+    totalRows   Int         @default(0)
+    processedRows Int       @default(0)
+    errorRows   Int         @default(0)
+    
+    // Processing results
+    previewData Json?
+    errorLog    Json?
+    
+    user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+    taxReturn   TaxReturn?  @relation(fields: [taxReturnId], references: [id], onDelete: SetNull)
+    mappings    DataMapping[]
+    
+    createdAt   DateTime    @default(now())
+    updatedAt   DateTime    @updatedAt
+}
+
+model FormTemplate {
+    id              String      @id @default(cuid())
+    formType        DocumentType
+    templateName    String
+    templateVersion String      @default("1.0")
+    isDefault       Boolean     @default(false)
+    
+    // Form structure definition
+    formFields      Json        // Defines all fields for this form type
+    requiredFields  String[]    // List of required field names
+    calculatedFields Json?      // Fields that are calculated from others
+    validationRules Json?       // Validation rules for form fields
+    
+    mappings        DataMapping[]
+    
+    createdAt       DateTime    @default(now())
+    updatedAt       DateTime    @updatedAt
+    
+    @@unique([formType, templateName])
+}
+
+model DataMapping {
+    id              String          @id @default(cuid())
+    userId          String
+    uploadId        String?
+    templateId      String
+    mappingName     String
+    isTemplate      Boolean         @default(false) // If true, can be reused
+    
+    // Mapping configuration
+    fieldMappings   Json           // Maps upload columns to form fields
+    transformations Json?          // Data transformation rules
+    defaultValues   Json?          // Default values for missing fields
+    
+    // Processing status
+    status          MappingStatus   @default(DRAFT)
+    
+    user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+    upload          DataUpload?     @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+    template        FormTemplate    @relation(fields: [templateId], references: [id], onDelete: Cascade)
+    
+    createdAt       DateTime        @default(now())
+    updatedAt       DateTime        @updatedAt
+}
+
+model ProcessedFormData {
+    id              String      @id @default(cuid())
+    taxReturnId     String
+    uploadId        String?
+    mappingId       String?
+    formType        DocumentType
+    
+    // Processed data
+    formData        Json        // The actual form data
+    originalRow     Json?       // Original row from upload file
+    rowNumber       Int?        // Row number in original file
+    
+    // Processing status
+    status          ProcessStatus @default(PENDING)
+    validationErrors Json?      // Any validation errors
+    
+    // Links to created entries
+    incomeEntryId   String?
+    deductionEntryId String?
+    
+    taxReturn       TaxReturn   @relation(fields: [taxReturnId], references: [id], onDelete: Cascade)
+    
+    createdAt       DateTime    @default(now())
+    updatedAt       DateTime    @updatedAt
+}
+
+enum UploadStatus {
+    PENDING
+    PROCESSING
+    COMPLETED
+    FAILED
+    CANCELLED
+}
+
+enum MappingStatus {
+    DRAFT
+    ACTIVE
+    COMPLETED
+    FAILED
+}
+
+enum ProcessStatus {
+    PENDING
+    PROCESSING
+    COMPLETED
+    FAILED
+    REQUIRES_REVIEW
+}
