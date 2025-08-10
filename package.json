@@ -2,9 +2,11 @@
   "name": "app",
   "private": true,
   "scripts": {
-    "build": "prisma generate && next build --experimental-build-mode=compile",
+    "build": "prisma generate && npx prisma migrate deploy && next build --experimental-build-mode=compile",
     "start": "prisma generate && next start",
-    "postinstall": "prisma generate"
+    "postinstall": "prisma generate",
+    "railway:build": "prisma generate && npx prisma migrate deploy && npx tsx scripts/initialize-form-templates.ts && next build",
+    "railway:start": "next start"
   },
   "prisma": {
     "seed": "tsx --require dotenv/config scripts/seed.ts"
