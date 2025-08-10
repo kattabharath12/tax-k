@@ -3,11 +3,10 @@
   "private": true,
   "scripts": {
     "build": "prisma generate && next build --experimental-build-mode=compile",
-    "start": "prisma generate && npx prisma migrate deploy && next start",
+    "start": "prisma generate && npm run db:setup && next start",
     "postinstall": "prisma generate",
-    "db:migrate": "npx prisma migrate deploy",
-    "db:seed": "npx prisma db seed",
-    "db:setup": "npx prisma migrate deploy && npx tsx scripts/initialize-form-templates.ts"
+    "db:setup": "npx prisma db push --accept-data-loss && npx tsx scripts/initialize-form-templates.ts",
+    "db:seed": "npx prisma db seed"
   },
   "prisma": {
     "seed": "tsx --require dotenv/config scripts/seed.ts"
